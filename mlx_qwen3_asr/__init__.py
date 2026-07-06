@@ -1,5 +1,11 @@
 from ._version import __version__
 from .audio import load_audio
+from .capswriter_runner import (
+    AudioFeedPatch,
+    CapsWriterRunnerConfig,
+    QwenASRRunner,
+    QwenASRRunnerResult,
+)
 from .forced_aligner import ForcedAligner
 from .load_models import load_model
 from .session import Session
@@ -18,6 +24,10 @@ __all__ = [
     "transcribe_batch",
     "transcribe_batch_async",
     "TranscriptionResult",
+    "AudioFeedPatch",
+    "CapsWriterRunnerConfig",
+    "QwenASRRunner",
+    "QwenASRRunnerResult",
     "load_model",
     "load_audio",
     "ForcedAligner",
