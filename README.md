@@ -286,7 +286,7 @@ committed JSON artifacts under `docs/benchmarks/`; see
 
 The 1.7B delivers a 30% relative improvement at 1.9x the latency. Per-language tables are in `docs/BENCHMARKS.md`.
 
-### MLX vs PyTorch quality (0.6B, Multilingual-100, measured February 2026)
+### MLX vs PyTorch quality (0.6B, same 100 multilingual clips, v0.4.0)
 
 | Metric | MLX | PyTorch | Delta |
 |---|---:|---:|---:|
@@ -294,14 +294,9 @@ The 1.7B delivers a 30% relative improvement at 1.9x the latency. Per-language t
 | WER | 16.00% | 16.69% | -0.70pp |
 | CER | 5.43% | 5.64% | -0.21pp |
 
-67% of samples produce identical text output. Remaining differences are minor lexical shifts, numeric surface forms (`10,000` vs `zehntausend`), or punctuation — not quality regressions.
+68% of clips produce identical text; the rest differ by lexical or numeric surface form (`10,000` vs `zehntausend`) or punctuation, not by quality. On LibriSpeech test-other the two are within 0.11pp WER, and on 80-second clips MLX scores 10.59% vs 17.99% because it chunks at pauses while the reference decodes the whole clip. The PyTorch reference runs on CPU on a Mac, so it is 7x to 20x slower here; that is a platform difference, not a like-for-like GPU comparison.
 
-On long-form audio (75-90s clips), **MLX is 4.19x faster** than PyTorch on the same machine.
-
-On an expanded real-world mixed lane (AMI IHM meetings + Earnings22 chunked,
-`n=200`), MLX remains near parity with PyTorch (**23.23%** vs **23.04%** WER,
-`+0.19pp` delta) while staying **3.27x faster** on the same machine
-(`1.34s` vs `4.39s` mean latency).
+On the real-world mixed lane (AMI IHM meetings + Earnings22 chunked, `n=200`, measured February 2026), MLX was within 0.19pp WER of PyTorch (23.23% vs 23.04%).
 
 ### Optimizations applied
 
@@ -355,9 +350,9 @@ GPT-4o-Transcribe leads on clean English read speech (1.39 WER). Parakeet-TDT-0.
 This implementation is validated against the official PyTorch model via multiple parity gates:
 
 - **MLX vs PyTorch head-to-head** — on the current multilingual-100 artifact, MLX shows lower aggregate primary error than PyTorch (9.54% vs 10.34%)
-- **Token-level greedy parity** — current multilingual-100 parity artifact shows 67% exact text match and 64% exact token match across 10 languages; remaining diffs are mostly lexical/numeric surface-form differences
+- **Token-level greedy parity** — v0.4.0 multilingual-100 parity artifact shows 68% exact text match and 66% exact token match across 10 languages; remaining diffs are mostly lexical/numeric surface-form differences
 - **Expanded parity suite** — tested across LibriSpeech test-clean, test-other, synthetic long mixes, and noise variants (SNR 10dB, 5dB)
-- **Long-form head-to-head (February 2026)** — on 10 multilingual clips (75-90s each) MLX scored lower error than the PyTorch reference (11.6% vs 18.0% primary error) at 4.2x to 5x lower latency; full 80-second transcripts do not match token for token, since greedy decoding diverges after the first differing token (median position 13)
+- **Long-form head-to-head** — on 10 multilingual clips (78-90s each) MLX scored lower error than the PyTorch reference (10.6% vs 18.0% primary error) because it chunks at pauses while the reference decodes each clip whole; full transcripts are not token-identical
 - **Mel spectrogram parity** — custom MLX mel matches HuggingFace WhisperFeatureExtractor with MAE < 3e-7
 - **Native aligner parity** — MLX forced aligner matches official `qwen-asr` backend with 100% text match rate, <6ms timing MAE, and 2.64x speed advantage on 50 LibriSpeech samples
 

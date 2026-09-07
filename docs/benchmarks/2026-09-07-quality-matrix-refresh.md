@@ -145,3 +145,22 @@ for CFG in fp16 8bit-g64 4bit-g64 1p7b-fp16; for CLIP in short 10s:
 The multilingual manifest was rebuilt with the original seed and contains the
 same 100 samples. The long-form set is new (derived from that manifest), so its
 numbers are not directly comparable with the February long-form lane.
+
+## MLX vs PyTorch parity (added after the initial refresh)
+
+Reference stack: `qwen-asr` (PyTorch 2.10, CPU). Commands:
+
+```bash
+python scripts/eval_manifest_head2head.py --mlx-json docs/benchmarks/2026-09-07-manifest-quality-multilingual100-0p6b.json --model Qwen/Qwen3-ASR-0.6B --json-output docs/benchmarks/2026-09-07-quality-head2head-mlx-vs-pytorch-multilingual100.json --md-output docs/benchmarks/2026-09-07-quality-head2head-mlx-vs-pytorch-multilingual100.md
+python scripts/eval_reference_parity_suite.py --model Qwen/Qwen3-ASR-0.6B --subsets '' --samples-per-subset 1 --manifest-jsonl docs/benchmarks/2026-09-07-fleurs-multilingual-100-manifest.jsonl --json-output docs/benchmarks/2026-09-07-reference-parity-suite-multilingual100.json
+python scripts/analyze_reference_parity_mismatches.py --input-json docs/benchmarks/2026-09-07-reference-parity-suite-multilingual100.json --json-output docs/benchmarks/2026-09-07-reference-parity-suite-multilingual100-analysis.json --md-output docs/benchmarks/2026-09-07-reference-parity-suite-multilingual100-analysis.md
+python scripts/eval_librispeech_head2head.py --mlx-json docs/benchmarks/2026-09-07-librispeech-test-other-100.json --model Qwen/Qwen3-ASR-0.6B --language English --json-output docs/benchmarks/2026-09-07-quality-head2head-mlx-vs-pytorch-test-other100.json --md-output docs/benchmarks/2026-09-07-quality-head2head-mlx-vs-pytorch-test-other100.md
+python scripts/eval_manifest_head2head.py --mlx-json docs/benchmarks/2026-09-07-manifest-quality-longform10-0p6b.json --model Qwen/Qwen3-ASR-0.6B --json-output docs/benchmarks/2026-09-07-quality-head2head-mlx-vs-pytorch-longform10.json --md-output docs/benchmarks/2026-09-07-quality-head2head-mlx-vs-pytorch-longform10.md
+```
+
+| Lane | MLX | PyTorch | February MLX / PyTorch |
+|---|---:|---:|---:|
+| Multilingual-100 primary error | 9.54% | 10.34% | 9.54% / 10.34% |
+| Multilingual-100 token / text match | 66% / 68% | — | 64% / 67% |
+| LibriSpeech test-other WER | 4.30% | 4.41% | 4.20% / 4.41% |
+| Long-form (new set) primary error | 10.59% | 17.99% | 11.56% / 17.99% (old set) |

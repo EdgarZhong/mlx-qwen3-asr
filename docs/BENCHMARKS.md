@@ -8,8 +8,8 @@ Two measurement generations are recorded here:
 - **2026-09-07 (v0.4.0)**: English, multilingual, long-form, quantization and latency
   lanes, Apple M4 Pro (48 GB), macOS 26, MLX 0.30.6. Snapshot with commands:
   `docs/benchmarks/2026-09-07-quality-matrix-refresh.md`.
-- **February 2026 (v0.2.x)**: real-world (AMI + Earnings22), MLX-vs-PyTorch
-  parity, aligner and mel parity, and the optimization studies further down.
+- **February 2026 (v0.2.x)**: real-world (AMI + Earnings22), aligner and mel
+  parity, and the optimization studies further down.
   Those sections are labelled with their date. Their latencies predate the
   v0.4.0 float16 fix and are conservative by roughly 2-3x; their quality
   numbers still hold, since the dtype change produced identical hypotheses on
@@ -27,7 +27,7 @@ Two measurement generations are recorded here:
 | 10s clip latency | 0.30s | 0.23s | 0.17s | 0.73s |
 | Multilingual mean latency | 0.65s | — | — | 1.22s |
 | Real-world200 WER (AMI+Earnings, Feb 2026) | 23.23% | — | — | — |
-| MLX vs PyTorch speed (long-form, Feb 2026) | 4.19x faster | — | — | — |
+| MLX vs PyTorch primary error (multilingual-100) | 9.54% vs 10.34% | — | — | — |
 
 ---
 
@@ -236,17 +236,20 @@ Artifact: `2026-02-15-quality-head2head-mlx-vs-pytorch-realworld200.md`
 
 ---
 
-## MLX vs PyTorch Parity (0.6B, Multilingual-100, February 2026)
+## MLX vs PyTorch Parity (0.6B, Multilingual-100)
 
-Head-to-head quality comparison: same audio, same model weights, greedy decode.
+Head-to-head on the same 100 FLEURS clips, same weights, greedy decode, run
+2026-09-07 against `qwen-asr` (PyTorch reference). PyTorch latencies are CPU inference (`device_map="cpu"`, the reference stack's Apple Silicon path) and are not a like-for-like GPU comparison; they are reported because that is what a user gets from the official package on a Mac.
 
 | Metric | MLX | PyTorch | Delta (MLX - Ref) |
 |---|---:|---:|---:|
 | WER | 16.00% | 16.69% | -0.70pp |
 | CER | 5.43% | 5.64% | -0.21pp |
 | Primary | 9.54% | 10.34% | **-0.81pp** |
+| Mean latency | 0.65s | 12.91s | 19.8x faster |
 
-MLX slightly outperforms PyTorch on aggregate — likely due to minor floating-point path differences that happen to favor MLX on this sample set.
+MLX is slightly better on aggregate; the per-language deltas below are within
+noise for 10 samples per language and show no systematic gap.
 
 ### Per-Language Breakdown
 
@@ -259,50 +262,64 @@ MLX slightly outperforms PyTorch on aggregate — likely due to minor floating-p
 | German | 8.0% | 6.7% | +1.3pp |
 | Hindi | 16.7% | 21.2% | -4.5pp |
 | Japanese | 9.3% | 10.8% | -1.5pp |
-| Korean | 6.8% | 6.5% | +0.2pp |
+| Korean | 6.7% | 6.5% | +0.2pp |
 | Russian | 8.8% | 9.3% | -0.5pp |
 | Spanish | 3.0% | 2.6% | +0.4pp |
 
-No language shows a systematic quality gap. Differences are within expected noise for n=10 per language.
-
-Artifact: `2026-02-15-quality-head2head-mlx-vs-pytorch-multilingual100.md`
+Artifact: `2026-09-07-quality-head2head-mlx-vs-pytorch-multilingual100.md`
 
 ### MLX vs PyTorch Head-to-Head (LibriSpeech test-other, n=100)
 
 | Metric | MLX | PyTorch | Delta (MLX - Ref) |
 |---|---:|---:|---:|
-| WER | 4.20% | 4.41% | -0.21pp |
-| CER | 2.09% | 2.14% | -0.05pp |
-| Mean latency | 0.71s | 2.16s | 3.05x faster |
+| WER | 4.30% | 4.41% | -0.11pp |
+| CER | 2.11% | 2.14% | -0.04pp |
+| Mean latency | 0.40s | 2.76s | 7.0x faster |
 
-Artifact: `2026-02-15-quality-head2head-mlx-vs-pytorch-test-other100.md`
+Artifact: `2026-09-07-quality-head2head-mlx-vs-pytorch-test-other100.md`
 
 ### MLX vs PyTorch Head-to-Head (Long-form manifest, n=10)
 
+10 concatenated FLEURS clips of 78-90 s, one per language.
+
 | Metric | MLX | PyTorch | Delta (MLX - Ref) |
 |---|---:|---:|---:|
-| Primary error | 11.56% | 17.99% | -6.42pp |
-| WER | 16.71% | 24.31% | -7.60pp |
-| CER | 7.04% | 11.97% | -4.94pp |
-| Mean latency | 11.13s | 55.12s | 4.95x faster |
+| Primary error | 10.59% | 17.99% | -7.40pp |
+| WER | 15.12% | 24.31% | -9.18pp |
+| CER | 6.00% | 11.97% | -5.97pp |
+| Mean latency | 3.75s | 26.76s | 7.1x faster |
 
-Artifact: `2026-02-15-quality-head2head-mlx-vs-pytorch-longform10.md`
+The reference is fed each 80-second clip whole; MLX splits it at low-energy
+points into 30 s chunks. The gap is mostly the reference degrading on long
+inputs, not MLX gaining.
+
+Artifact: `2026-09-07-quality-head2head-mlx-vs-pytorch-longform10.md`
 
 ### Token-Level Parity Analysis
 
+Strict greedy parity on the same 100 multilingual clips: token match rate
+66%, normalized text match rate 68%.
+
 | Category | Count |
 |---|---:|
-| Exact match | 64 |
-| Minor lexical shift | 26 |
+| Exact match | 66 |
+| Punctuation or tokenization | 2 |
 | Numeric surface form | 5 |
-| Punctuation/tokenization | 3 |
-| Content shift | 2 |
+| Content shift | 3 |
+| Minor lexical shift | 24 |
 
-67% of samples produce identical text. The remaining 33% differ in minor ways — synonym choices, number formatting (`10,000` vs `zehntausend`), or punctuation. Only 2% show meaningful content differences.
+Mismatches are dominated by lexical and numeric surface forms (`10,000` vs
+`zehntausend`), which both score as errors or both as correct against the
+reference transcript; they do not indicate a quality regression. Chinese,
+Korean and Russian match token for token on 9 of 10 clips; Arabic, French
+and Hindi diverge earliest.
 
-Artifact: `2026-02-15-reference-parity-suite-multilingual100-post-refactor-analysis.md`
+Artifacts: `2026-09-07-reference-parity-suite-multilingual100.json`,
+`2026-09-07-reference-parity-suite-multilingual100-analysis.md`
 
-### Long-Form Speed
+---
+
+### Long-Form Speed (February 2026, superseded by the head-to-head above)
 
 | Metric | MLX | PyTorch | Ratio |
 |---|---:|---:|---:|
@@ -408,6 +425,8 @@ All benchmark artifacts are committed under `docs/benchmarks/`. Key files:
 | `2026-09-07-quality-matrix-refresh.md` | v0.4.0 quality + latency refresh (commands and tables) |
 | `2026-09-07-quant-matrix-test-{clean,other}-speaker100.md` | v0.4.0 quantization quality |
 | `2026-09-07-latency-*.json` | v0.4.0 idle-machine latency runs |
+| `2026-09-07-quality-head2head-mlx-vs-pytorch-*.md` | v0.4.0 MLX vs PyTorch on multilingual-100, test-other, long-form |
+| `2026-09-07-reference-parity-suite-multilingual100-analysis.md` | v0.4.0 token-level parity |
 | `2026-02-14-quant-matrix-speaker100.md` | Quantization quality + latency matrix |
 | `2026-02-15-quant-matrix-test-other-speaker100.md` | Quantization quality + latency on LibriSpeech test-other |
 | `2026-02-15-manifest-quality-multilingual100-0p6b-refresh.json` | 0.6B multilingual quality |
