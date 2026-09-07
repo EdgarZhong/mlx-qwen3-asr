@@ -357,7 +357,7 @@ This implementation is validated against the official PyTorch model via multiple
 - **MLX vs PyTorch head-to-head** — on the current multilingual-100 artifact, MLX shows lower aggregate primary error than PyTorch (9.54% vs 10.34%)
 - **Token-level greedy parity** — current multilingual-100 parity artifact shows 67% exact text match and 64% exact token match across 10 languages; remaining diffs are mostly lexical/numeric surface-form differences
 - **Expanded parity suite** — tested across LibriSpeech test-clean, test-other, synthetic long mixes, and noise variants (SNR 10dB, 5dB)
-- **Long-form parity** — 10 multilingual clips (75-90s each) transcribed correctly with no chunking artifacts, 4.19x faster than PyTorch
+- **Long-form head-to-head (February 2026)** — on 10 multilingual clips (75-90s each) MLX scored lower error than the PyTorch reference (11.6% vs 18.0% primary error) at 4.2x to 5x lower latency; full 80-second transcripts do not match token for token, since greedy decoding diverges after the first differing token (median position 13)
 - **Mel spectrogram parity** — custom MLX mel matches HuggingFace WhisperFeatureExtractor with MAE < 3e-7
 - **Native aligner parity** — MLX forced aligner matches official `qwen-asr` backend with 100% text match rate, <6ms timing MAE, and 2.64x speed advantage on 50 LibriSpeech samples
 

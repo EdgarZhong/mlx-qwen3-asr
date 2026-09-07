@@ -45,7 +45,7 @@ make broad "production-grade across languages/conditions" quality claims.
     - MLX-vs-PyTorch full `n=3` long-form comparison artifact committed
       (`...earnings22-full-longform3...`, bounded reference chunking).
 - MLX-vs-PyTorch head-to-head:
-  - Multilingual-100 direct comparison (MLX: 15.99% WER vs PyTorch: 16.69% WER).
+  - Multilingual-100 direct comparison (MLX: 16.00% WER vs PyTorch: 16.69% WER).
   - LibriSpeech test-other direct comparison (MLX: 4.20% WER vs PyTorch: 4.41% WER).
   - Long-form manifest direct comparison (MLX: 16.71% WER vs PyTorch: 24.31% WER).
   - Real-world manifest direct comparison
