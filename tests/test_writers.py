@@ -219,8 +219,10 @@ class TestSubtitleGrouping:
     def test_cjk_wraps_by_display_width(self):
         text = "字" * 45
         grouped = group_subtitle_segments(self._char_segments(text), language="Chinese")
-        # 42 display cells / 2 per CJK character = 21 characters per cue.
-        assert [len(g["text"]) for g in grouped] == [21, 21, 3]
+        # 42 display cells / 2 per CJK character = 21 characters per cue; the
+        # final width break is rebalanced so the tail is not a 3-character stub.
+        assert [len(g["text"]) for g in grouped] == [21, 17, 7]
+        assert all(len(g["text"]) <= 21 for g in grouped)
         assert "".join(g["text"] for g in grouped) == text
 
     def test_cjk_breaks_at_restored_sentence_and_clause_boundaries(self):
@@ -242,6 +244,32 @@ class TestSubtitleGrouping:
         ]
         grouped = group_subtitle_segments(segments, language="Chinese")
         assert [g["text"] for g in grouped] == ["你好", "再见"]
+
+    def test_width_break_does_not_orphan_a_last_word(self):
+        words = "The quick brown fox jumps over the lazy dog".split()
+        segments = [
+            {"text": w, "start": i * 0.3, "end": (i + 1) * 0.3} for i, w in enumerate(words)
+        ]
+        grouped = group_subtitle_segments(
+            segments, language="English", text="The quick brown fox jumps over the lazy dog."
+        )
+        assert [g["text"] for g in grouped] == [
+            "The quick brown fox jumps",
+            "over the lazy dog.",
+        ]
+        assert grouped[0]["end"] == grouped[1]["start"]
+
+    def test_balancing_only_applies_to_width_breaks(self):
+        # A sentence-end break followed by a short sentence must stay as-is.
+        words = ["Here", "is", "a", "fairly", "long", "opening", "sentence.", "Yes."]
+        segments = [
+            {"text": w, "start": i * 0.3, "end": (i + 1) * 0.3} for i, w in enumerate(words)
+        ]
+        grouped = group_subtitle_segments(segments, language="English")
+        assert [g["text"] for g in grouped] == [
+            "Here is a fairly long opening sentence.",
+            "Yes.",
+        ]
 
     def test_latin_word_cap_is_unchanged(self):
         segments = [

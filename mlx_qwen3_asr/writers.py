@@ -152,17 +152,9 @@ def group_subtitle_segments(
         segments = restore_punctuation(segments, text)
     no_space = is_no_space_language(language)
 
-    grouped: list[dict] = []
+    cues: list[list[dict]] = []  # token lists; joined at the end
     current: list[dict] = []
-
-    def _flush() -> None:
-        grouped.append(
-            {
-                "text": _join_subtitle_tokens(current, language=language),
-                "start": float(current[0]["start"]),
-                "end": float(current[-1]["end"]),
-            }
-        )
+    width_broken: set[int] = set()  # indices of cues opened by a width overflow
 
     for seg in segments:
         seg_text = str(seg.get("text", "")).strip()
@@ -178,24 +170,55 @@ def group_subtitle_segments(
         current_text = _join_subtitle_tokens(current, language=language)
         candidate_text = _join_subtitle_tokens([*current, item], language=language)
         last_text = str(current[-1]["text"])
-        should_break = (
+        hard_break = (
             start - float(current[-1]["end"]) >= max_gap_sec
             or end - float(current[0]["start"]) > max_duration_sec
             or item["speaker"] != current[-1]["speaker"]
             or (not no_space and len(current) >= max_words)
-            or _display_width(candidate_text) > max_chars
             or _ends_sentence(last_text)
             or (_ends_clause(last_text) and _display_width(current_text) * 2 >= max_chars)
         )
-        if should_break:
-            _flush()
+        if hard_break or _display_width(candidate_text) > max_chars:
+            cues.append(current)
+            if not hard_break:
+                width_broken.add(len(cues))
             current = [item]
         else:
             current.append(item)
 
     if current:
-        _flush()
-    return grouped
+        cues.append(current)
+    for index in width_broken:
+        if index < len(cues):
+            _balance_pair(cues[index - 1], cues[index], language=language, max_chars=max_chars)
+    return [
+        {
+            "text": _join_subtitle_tokens(tokens, language=language),
+            "start": float(tokens[0]["start"]),
+            "end": float(tokens[-1]["end"]),
+        }
+        for tokens in cues
+    ]
+
+
+def _balance_pair(left: list[dict], right: list[dict], *, language: str, max_chars: int) -> None:
+    """Move trailing words from ``left`` to ``right`` when a width break orphaned a stub.
+
+    A width overflow splits a phrase wherever the budget ran out, so the second
+    cue can be a single word ("... over the lazy" / "dog."). Rebalance in place
+    while the right cue is under a third of the budget and the move still
+    leaves the left cue the wider of the two.
+    """
+    threshold = max_chars // 3
+
+    def width(tokens: list[dict]) -> int:
+        return _display_width(_join_subtitle_tokens(tokens, language=language))
+
+    while len(left) > 1 and width(right) < threshold:
+        moved = [left[-1], *right]
+        if width(moved) > max_chars or width(left[:-1]) < width(moved):
+            break
+        right.insert(0, left.pop())
 
 
 def restore_punctuation(segments: list[dict], text: str) -> list[dict]:
