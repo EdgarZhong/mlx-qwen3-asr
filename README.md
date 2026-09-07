@@ -22,7 +22,7 @@ This project rewrites every layer for MLX so the same model runs natively on M1/
 - **Long audio support** — hours-long input split at low-energy points into 30-second chunks; no 30-second feature truncation, memory released between chunks
 - **Word-level timestamps** — native MLX forced aligner (default, 2.6x faster than PyTorch alternative) with O(n log n) LIS-based timestamp correction
 - **Speaker diarization (optional)** — offline speaker-labeled outputs via `pyannote` integration (`--diarize`)
-- **4-bit and 8-bit quantization** — up to 4.7x speedup with measured quality reporting on 100 speaker-balanced samples
+- **4-bit and 8-bit quantization** — 8-bit matches fp16 output; 4-bit is 1.7x faster on 10 s clips, with quality measured on 100 speaker-balanced samples
 - **Multiple output formats** — txt, json, srt, vtt, tsv
 - **Built-in HTTP server** — `mlx-qwen3-asr serve` exposes the pipeline over HTTP with async jobs, OpenAI API compatibility, and Bearer token auth
 - **Session API** — explicit model/tokenizer ownership with no hidden global state
@@ -243,55 +243,50 @@ See [examples/](examples/) for copy-paste workflows covering the OpenAI-compatib
 
 ## Performance on Apple Silicon
 
-Measured on Apple M4 Pro, macOS 26.2. All numbers from controlled runs with benchmark JSON artifacts committed to the repo. See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the full breakdown.
+Measured on Apple M4 Pro (48 GB), macOS 26, v0.4.0. All numbers come from
+committed JSON artifacts under `docs/benchmarks/`; see
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md) for the full breakdown and
+`docs/benchmarks/2026-09-07-quality-matrix-refresh.md` for the exact commands.
 
-### Latency (0.6B)
+### Latency (median of 10 runs)
 
-| Configuration | Short clip (~2.5s) | 10s clip | Real-time factor | vs fp16 |
-|---|---|---|---|---|
-| **fp16** (baseline) | 0.46s | 0.83s | 0.08x | — |
-| **8-bit** (q8, group 64) | 0.11s | 0.27s | 0.03x | 3.11x faster |
-| **4-bit** (q4, group 64) | 0.13s | 0.18s | 0.02x | **4.68x faster** |
+| Configuration | Short clip (~2.5s) | 10s clip | RTF (10s) | vs fp16 (10s) |
+|---|---:|---:|---:|---:|
+| 0.6B fp16 (baseline) | 0.17s | 0.30s | 0.029 | — |
+| 0.6B 8-bit (g64) | 0.10s | 0.23s | 0.024 | 1.32x |
+| 0.6B 4-bit (g64) | 0.09s | 0.17s | 0.018 | **1.71x** |
+| 1.7B fp16 | 0.36s | 0.73s | 0.077 | 2.4x slower |
 
-### English quality refresh (LibriSpeech, 100 speaker-balanced samples per subset)
+### English quality (LibriSpeech, 100 speaker-balanced samples per subset)
 
-| Model | Subset | WER | CER | Mean eval latency | RTF |
-|---|---|---|---|---|---|
-| 0.6B | test-clean | 2.29% | 0.59% | 0.86s | 0.0957 |
-| 0.6B | test-other | 4.20% | 2.09% | 0.71s | 0.0985 |
-| 1.7B | test-clean | 1.99% | 0.61% | 2.43s | 0.2708 |
-| 1.7B | test-other | 3.45% | 1.42% | 2.02s | 0.2814 |
+| Model | Subset | WER | CER | Mean Latency | RTF |
+|---|---|---:|---:|---:|---:|
+| 0.6B | test-clean | 2.33% | 0.59% | 0.35s | 0.0393 |
+| 0.6B | test-other | 4.30% | 2.11% | 0.40s | 0.0553 |
+| 1.7B | test-clean | 1.94% | 0.57% | 0.77s | 0.0862 |
+| 1.7B | test-other | 3.45% | 1.48% | 0.66s | 0.0914 |
 
-Artifacts: `docs/benchmarks/2026-02-15-librispeech-test-clean-100.json`, `docs/benchmarks/2026-02-15-librispeech-test-other-100.json`, `docs/benchmarks/2026-02-15-librispeech-test-clean-100-1p7b.json`, `docs/benchmarks/2026-02-15-librispeech-test-other-100-1p7b.json`.
+### Quantization (0.6B, LibriSpeech, 100 speaker-balanced samples per subset)
 
-### Quantization quality (0.6B, LibriSpeech test-clean, 100 speaker-balanced samples)
+| Configuration | test-clean WER | test-other WER | Speed vs fp16 (10s clip) |
+|---|---:|---:|---:|
+| fp16 | 2.33% | 4.30% | — |
+| 8-bit (g64) | 2.33% | 4.14% | 1.32x |
+| 4-bit (g64) | 2.59% | 5.74% | 1.71x |
 
-| Configuration | WER | CER | Mean eval latency | vs fp16 Speed |
-|---|---|---|---|---|
-| fp16 | 2.29% | 0.59% | 1.09s | — |
-| 8-bit (g64) | 2.33% | 0.59% | 0.34s | 3.11x |
-| 4-bit (g64) | 2.72% | 0.88% | 0.30s | 4.68x |
-
-8-bit is near-fp16 quality (+0.04pp WER). 4-bit trades +0.43pp WER for maximum speed.
-
-On the harder `test-other` lane (`n=100`, speaker-balanced), 8-bit remains near-fp16
-(-0.05pp WER) while 4-bit shows a larger quality tradeoff (+1.38pp WER). Speedups
-remain strong (3.66x for 8-bit, 4.37x for 4-bit on the 10s benchmark clip).
-
-Artifact: `docs/benchmarks/2026-02-15-quant-matrix-test-other-speaker100.md`.
+8-bit reproduces fp16 output exactly on test-clean. 4-bit trades about +0.3pp
+(clean) to +1.4pp (other) WER for the lowest latency.
 
 ### Multilingual quality (FLEURS, 10 languages x 10 samples)
 
-| Model | Primary Error Rate | Mean Latency | Best Languages | Weakest |
+| Model | Primary error rate | Mean latency | Best languages | Weakest |
 |---|---|---|---|---|
-| **0.6B** fp16 | 9.37% | 1.44s | Spanish 3.0%, Chinese 4.4%, English 4.6% | Hindi 16.7%, French 18.2%, Arabic 21.5% |
-| **1.7B** fp16 | **6.70%** | 4.12s | Spanish 0.7%, Japanese 3.6%, French 4.1% | Chinese 8.5%, Arabic 16.5%, Hindi 17.4% |
+| **0.6B** fp16 | 9.54% | 0.65s | Spanish 3.0%, English 4.6%, Chinese 5.0% | Hindi 16.7%, French 17.3%, Arabic 21.5% |
+| **1.7B** fp16 | **6.70%** | 1.22s | Spanish 0.7%, Japanese 3.6%, French 4.1% | Chinese 8.5%, Arabic 16.0%, Hindi 17.7% |
 
-The 1.7B delivers a 28% relative improvement, with the biggest gains on French (-14.1pp), Japanese (-4.9pp), and Arabic (-5.0pp). The 1.7B runs ~2.86x slower.
+The 1.7B delivers a 30% relative improvement at 1.9x the latency. Per-language tables are in `docs/BENCHMARKS.md`.
 
-Artifacts: `docs/benchmarks/2026-02-15-manifest-quality-multilingual100-0p6b-refresh.json`, `docs/benchmarks/2026-02-15-manifest-quality-multilingual100-1p7b-refresh.json`.
-
-### MLX vs PyTorch quality (0.6B, Multilingual-100)
+### MLX vs PyTorch quality (0.6B, Multilingual-100, measured February 2026)
 
 | Metric | MLX | PyTorch | Delta |
 |---|---:|---:|---:|
@@ -317,9 +312,9 @@ On an expanded real-world mixed lane (AMI IHM meetings + Earnings22 chunked,
 - **Native WAV fast-path** — custom binary parser bypasses ffmpeg process startup for PCM/float WAV files (up to 25% faster on quantized short clips)
 - **Native in-repo BPE tokenizer** — no `transformers` dependency in runtime transcription path
 - **Cached model and tokenizer instances** — repeated `transcribe()` calls skip reload overhead
-- **4-bit / 8-bit quantization** — up to 4.7x speed gain with explicit per-profile quality reporting
+- **4-bit / 8-bit quantization** — 1.3x to 1.7x faster than fp16 with explicit per-profile quality reporting
 
-Full benchmark report: `docs/BENCHMARKS.md`. Latest refresh snapshot: `docs/benchmarks/2026-02-15-quality-matrix-refresh.md`. All benchmark artifacts are committed under `docs/benchmarks/` for reproducibility.
+Full benchmark report: `docs/BENCHMARKS.md`. Latest refresh snapshot: `docs/benchmarks/2026-09-07-quality-matrix-refresh.md`. All benchmark artifacts are committed under `docs/benchmarks/` for reproducibility.
 
 ## Model quality
 
@@ -487,8 +482,8 @@ mlx-qwen3-asr audio.wav --model ./qwen3-asr-4bit
 ```
 
 Recommended profiles:
-- **Speed-first**: 4-bit, group_size=64 — 4.68x faster / +0.43 WER (`test-clean`), 4.37x faster / +1.38 WER (`test-other`)
-- **Quality-first**: 8-bit, group_size=64 — 3.11x faster / +0.04 WER (`test-clean`), 3.66x faster / -0.05 WER (`test-other`)
+- **Speed-first**: 4-bit, group_size=64 — 1.71x faster on the 10 s clip; +0.26pp WER (`test-clean`), +1.43pp WER (`test-other`)
+- **Quality-first**: 8-bit, group_size=64 — 1.32x faster on the 10 s clip; identical output to fp16 on `test-clean`, -0.16pp WER (`test-other`)
 
 Publish quantized models to HuggingFace:
 

@@ -24,8 +24,8 @@ Silicon. This is an implementation-focused view, not a model-quality ranking.
 
 From committed artifacts in this repo:
 
-- Quantized long-clip speedup (`0.6B`, 10s lane): `4bit-g64` at `4.68x` vs fp16
-  (`docs/benchmarks/2026-02-14-quant-matrix-speaker100.md`)
+- Quantized long-clip speedup (`0.6B`, 10s lane, v0.4.0): `4bit-g64` at `1.71x` vs fp16; 8-bit matches fp16 output
+  (`docs/benchmarks/2026-09-07-quality-matrix-refresh.md`)
 - Timestamp backend parity snapshot (`test-clean`, English, `n=50`):
   - text match rate: `1.0000`
   - timing MAE: `5.6909 ms`

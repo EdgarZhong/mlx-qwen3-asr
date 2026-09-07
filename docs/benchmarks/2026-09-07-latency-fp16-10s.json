@@ -1,0 +1,17 @@
+{
+  "audio_path": "/Users/dmoon/.cache/mlx-qwen3-asr/quant-matrix/long_10s.wav",
+  "audio_duration_sec": 10.0,
+  "model": "Qwen/Qwen3-ASR-0.6B",
+  "dtype": "float16",
+  "runs": 10,
+  "warmup_runs": 3,
+  "latency_sec": {
+    "mean": 0.2934414082985313,
+    "median": 0.298479833498277,
+    "min": 0.24411170800158288,
+    "max": 0.3200432089943206,
+    "std": 0.023447814061576755
+  },
+  "rtf": 0.029344140829853132,
+  "transcript_preview": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The"
+}

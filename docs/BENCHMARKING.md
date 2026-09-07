@@ -242,7 +242,20 @@ Latest multilingual expanded artifacts:
 - `docs/benchmarks/2026-02-14-reference-parity-suite-multilingual-100-analysis.json`
 - `docs/benchmarks/2026-02-14-reference-parity-suite-multilingual-100-analysis.md`
 
-Latest quality-matrix refresh artifacts:
+Quality and latency refresh for v0.4.0 (2026-09-07, Apple M4 Pro):
+- `docs/benchmarks/2026-09-07-quality-matrix-refresh.md` (summary + commands)
+- `docs/benchmarks/2026-09-07-librispeech-test-{clean,other}-100.json`
+- `docs/benchmarks/2026-09-07-librispeech-test-{clean,other}-100-1p7b.json`
+- `docs/benchmarks/2026-09-07-quant-matrix-test-{clean,other}-speaker100.{json,md}`
+- `docs/benchmarks/2026-09-07-latency-{fp16,8bit-g64,4bit-g64,1p7b-fp16}-{short,10s}.json`
+- `docs/benchmarks/2026-09-07-fleurs-multilingual-100-manifest.jsonl`
+  (same 100 samples as the 2026-02-14 manifest, rebuilt with the same seed)
+- `docs/benchmarks/2026-09-07-manifest-quality-multilingual100-{0p6b,1p7b}.json`
+- `docs/benchmarks/2026-09-07-fleurs-longform-10x75-manifest.jsonl`
+  (new deterministic long-form set derived from the manifest above)
+- `docs/benchmarks/2026-09-07-manifest-quality-longform10-0p6b.json`
+
+Previous quality-matrix refresh artifacts (2026-02-15):
 - `docs/benchmarks/2026-02-15-librispeech-test-clean-100.json`
 - `docs/benchmarks/2026-02-15-librispeech-test-other-100.json`
 - `docs/benchmarks/2026-02-15-manifest-quality-multilingual100-0p6b-refresh.json`
@@ -303,7 +316,15 @@ After:  mean=<x2>s median=<y2>s rtf=<z2>
 Quality Gate: fast=<pass/fail>, release=<pass/fail or not run>
 ```
 
-## Latest Local Finding (2026-02-14)
+## Measurement history
+
+The dated findings below are kept as a record of how each optimization was
+validated at the time. Current numbers live in `docs/BENCHMARKS.md` and
+`docs/benchmarks/2026-09-07-quality-matrix-refresh.md`; the February fp16
+latencies are 2-3x higher than today's because fp16 inference was running in
+float32 until v0.4.0, which also inflated the quantization speedup ratios.
+
+## Local Finding (2026-02-14)
 
 - Change: tokenizer instance caching across repeated `transcribe()` calls.
 - Machine: Apple M4 Pro, macOS 26.2.

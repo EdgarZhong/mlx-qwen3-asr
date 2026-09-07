@@ -1,20 +1,33 @@
 # Benchmarks
 
-Comprehensive benchmark results for mlx-qwen3-asr on Apple Silicon. All numbers measured on Apple M4 Pro, macOS 26.2. Every result has a committed JSON artifact under `docs/benchmarks/` for reproducibility.
+Benchmark results for mlx-qwen3-asr on Apple Silicon. Every result has a
+committed JSON artifact under `docs/benchmarks/` for reproducibility.
+
+Two measurement generations are recorded here:
+
+- **2026-09-07 (v0.4.0)**: English, multilingual, long-form, quantization and latency
+  lanes, Apple M4 Pro (48 GB), macOS 26, MLX 0.30.6. Snapshot with commands:
+  `docs/benchmarks/2026-09-07-quality-matrix-refresh.md`.
+- **February 2026 (v0.2.x)**: real-world (AMI + Earnings22), MLX-vs-PyTorch
+  parity, aligner and mel parity, and the optimization studies further down.
+  Those sections are labelled with their date. Their latencies predate the
+  v0.4.0 float16 fix and are conservative by roughly 2-3x; their quality
+  numbers still hold, since the dtype change produced identical hypotheses on
+  the 100-sample LibriSpeech lane.
 
 ## Summary
 
-| Metric | 0.6B fp16 | 0.6B 4-bit | 0.6B 8-bit | 1.7B fp16 |
+| Metric | 0.6B fp16 | 0.6B 8-bit | 0.6B 4-bit | 1.7B fp16 |
 |---|---|---|---|---|
-| LibriSpeech test-clean WER | 2.29% | 2.72% | 2.33% | 1.99% |
-| LibriSpeech test-other WER | 4.20% | — | — | 3.45% |
-| Real-world200 WER (AMI+Earnings) | 23.23% | — | — | — |
-| Multilingual primary | 9.37% | — | — | 6.70% |
-| Short clip latency (~2.5s) | 0.46s | 0.13s | 0.11s | — |
-| 10s clip latency | 0.83s | 0.18s | 0.27s | — |
-| Multilingual mean latency | 1.44s | — | — | 4.12s |
-| MLX vs PyTorch speed (long-form) | 4.19x faster | — | — | — |
-| MLX vs PyTorch speed (real-world200) | 3.27x faster | — | — | — |
+| LibriSpeech test-clean WER | 2.33% | 2.33% | 2.59% | 1.94% |
+| LibriSpeech test-other WER | 4.30% | 4.14% | 5.74% | 3.45% |
+| Multilingual primary error (FLEURS 100) | 9.54% | — | — | 6.70% |
+| Long-form primary error (FLEURS 10x80s) | 10.6% | — | — | — |
+| Short clip latency (~2.5s) | 0.17s | 0.10s | 0.09s | 0.36s |
+| 10s clip latency | 0.30s | 0.23s | 0.17s | 0.73s |
+| Multilingual mean latency | 0.65s | — | — | 1.22s |
+| Real-world200 WER (AMI+Earnings, Feb 2026) | 23.23% | — | — | — |
+| MLX vs PyTorch speed (long-form, Feb 2026) | 4.19x faster | — | — | — |
 
 ---
 
@@ -22,152 +35,158 @@ Comprehensive benchmark results for mlx-qwen3-asr on Apple Silicon. All numbers 
 
 | Model | Subset | WER | CER | Mean Latency | RTF |
 |---|---|---:|---:|---:|---:|
-| 0.6B | test-clean | 2.29% | 0.59% | 0.86s | 0.0957 |
-| 0.6B | test-other | 4.20% | 2.09% | 0.71s | 0.0985 |
-| 1.7B | test-clean | 1.99% | 0.61% | 2.43s | 0.2708 |
-| 1.7B | test-other | 3.45% | 1.42% | 2.02s | 0.2814 |
+| 0.6B | test-clean | 2.33% | 0.59% | 0.35s | 0.0393 |
+| 0.6B | test-other | 4.30% | 2.11% | 0.40s | 0.0553 |
+| 1.7B | test-clean | 1.94% | 0.57% | 0.77s | 0.0862 |
+| 1.7B | test-other | 3.45% | 1.48% | 0.66s | 0.0914 |
 
-Artifacts:
-- `2026-02-15-librispeech-test-clean-100.json`
-- `2026-02-15-librispeech-test-other-100.json`
-- `2026-02-15-librispeech-test-clean-100-1p7b.json`
-- `2026-02-15-librispeech-test-other-100-1p7b.json`
+Artifacts: `2026-09-07-librispeech-test-{clean,other}-100.json`,
+`2026-09-07-librispeech-test-{clean,other}-100-1p7b.json`
+
+---
+
+## Latency
+
+Median of 10 timed runs after 3 warm-ups, idle machine. The short clip is
+`tests/fixtures/test_speech.wav` (2.5 s); the 10 s clip is that fixture tiled.
+
+| Configuration | Short clip (~2.5s) | 10s clip | RTF (10s) | vs fp16 (10s) |
+|---|---:|---:|---:|---:|
+| 0.6B fp16 (baseline) | 0.17s | 0.30s | 0.029 | — |
+| 0.6B 8-bit (g64) | 0.10s | 0.23s | 0.024 | 1.32x |
+| 0.6B 4-bit (g64) | 0.09s | 0.17s | 0.018 | **1.71x** |
+| 1.7B fp16 | 0.36s | 0.73s | 0.077 | 2.4x slower |
+
+Quantization speedups are smaller than the February figures because fp16 no
+longer runs in float32. Where absolute latency matters most, 4-bit is still the
+fastest option; where quality matters, 8-bit matches fp16 output.
+
+Artifacts: `2026-09-07-latency-{fp16,8bit-g64,4bit-g64,1p7b-fp16}-{short,10s}.json`
 
 ---
 
 ## Quantization Quality (0.6B, LibriSpeech test-clean)
 
-100 speaker-balanced samples, round-robin sampling across speakers.
+100 speaker-balanced samples, round-robin sampling across speakers. 8-bit
+produced the same hypothesis as fp16 on all 100 samples.
 
-| Configuration | WER | CER | Mean Latency | Real-Time Factor | vs fp16 Speed |
-|---|---:|---:|---:|---:|---:|
-| fp16 (baseline) | 2.29% | 0.59% | 1.09s | 0.121 | — |
-| 8-bit (g64) | 2.33% | 0.59% | 0.34s | 0.038 | **3.11x** |
-| 4-bit (g64) | 2.72% | 0.88% | 0.30s | 0.034 | **4.68x** |
+| Configuration | WER | CER | WER vs fp16 | Speed vs fp16 (10s clip) |
+|---|---:|---:|---:|---:|
+| fp16 (baseline) | 2.33% | 0.59% | — | — |
+| 8-bit (g64) | 2.33% | 0.59% | +0.00pp | 1.32x |
+| 4-bit (g64) | 2.59% | 0.86% | +0.26pp | 1.71x |
 
-8-bit is near-fp16 quality (+0.04pp WER). 4-bit trades +0.43pp WER for maximum speed.
-
-Artifact: `2026-02-14-quant-matrix-speaker100.md`
+Artifact: `2026-09-07-quant-matrix-test-clean-speaker100.md`
 
 ---
 
 ## Quantization Quality (0.6B, LibriSpeech test-other)
 
-100 speaker-balanced samples, round-robin sampling across speakers.
+| Configuration | WER | CER | WER vs fp16 | Speed vs fp16 (10s clip) |
+|---|---:|---:|---:|---:|
+| fp16 (baseline) | 4.30% | 2.11% | — | — |
+| 8-bit (g64) | 4.14% | 2.06% | -0.16pp | 1.32x |
+| 4-bit (g64) | 5.74% | 2.71% | +1.43pp | 1.71x |
 
-| Configuration | WER | CER | Mean Latency | Real-Time Factor | vs fp16 Speed |
-|---|---:|---:|---:|---:|---:|
-| fp16 (baseline) | 4.20% | 2.09% | 0.71s | 0.099 | — |
-| 8-bit (g64) | 4.14% | 2.08% | 0.19s | 0.027 | **3.66x** |
-| 4-bit (g64) | 5.58% | 2.74% | 0.16s | 0.023 | **4.37x** |
-
-Interpretation:
-- 8-bit remains near-fp16 on the harder subset (WER delta `-0.05pp`).
-- 4-bit keeps the largest speedup but with a larger quality tradeoff (`+1.38pp` WER).
-
-Artifact: `2026-02-15-quant-matrix-test-other-speaker100.md`
-
----
-
-## Latency (0.6B)
-
-| Configuration | Short (~2.5s) | 10s clip | Real-Time Factor |
-|---|---:|---:|---:|
-| fp16 | 0.46s | 0.83s | 0.08x |
-| 8-bit (g64) | 0.11s | 0.27s | 0.03x |
-| 4-bit (g64) | 0.13s | 0.18s | 0.02x |
-
-Artifacts: `2026-02-14-quant-matrix-speaker100.json`, `2026-02-14-quant-matrix-post-wavfast.json`
+Artifact: `2026-09-07-quant-matrix-test-other-speaker100.md`
 
 ---
 
 ## Multilingual Quality (FLEURS, 10 languages x 10 samples)
 
-Primary metric rule: CER for Chinese/Japanese/Korean; WER for all others.
+Primary metric rule: CER for Chinese/Japanese/Korean; WER for all others. The
+manifest is `2026-09-07-fleurs-multilingual-100-manifest.jsonl`, rebuilt with the
+February seed and containing the same 100 samples.
 
 ### 0.6B (fp16)
 
 | Language | Samples | WER | CER | Primary | Latency |
 |---|---:|---:|---:|---:|---:|
-| Arabic | 10 | 21.5% | 7.0% | 21.5% | 1.30s |
-| Chinese | 10 | 90.0% | 4.4% | 4.4% | 0.81s |
-| English | 10 | 4.6% | 1.9% | 4.6% | 0.81s |
-| French | 10 | 18.2% | 9.2% | 18.2% | 1.14s |
-| German | 10 | 8.0% | 4.7% | 8.0% | 1.38s |
-| Hindi | 10 | 16.7% | 9.8% | 16.7% | 3.80s |
-| Japanese | 10 | 82.1% | 8.5% | 8.5% | 1.23s |
-| Korean | 10 | 17.2% | 6.7% | 6.7% | 1.17s |
-| Russian | 10 | 8.8% | 3.4% | 8.8% | 1.47s |
-| Spanish | 10 | 3.0% | 0.6% | 3.0% | 1.31s |
-| **Aggregate** | **100** | **15.9%** | **5.4%** | **9.37%** | **1.44s** |
+| Arabic | 10 | 21.5% | 6.8% | 21.5% | 0.54s |
+| Chinese | 10 | 91.7% | 5.0% | 5.0% | 0.36s |
+| English | 10 | 4.6% | 1.6% | 4.6% | 0.32s |
+| French | 10 | 17.3% | 9.2% | 17.3% | 0.50s |
+| German | 10 | 8.0% | 4.7% | 8.0% | 0.65s |
+| Hindi | 10 | 16.7% | 9.9% | 16.7% | 1.98s |
+| Japanese | 10 | 89.7% | 9.3% | 9.3% | 0.51s |
+| Korean | 10 | 17.2% | 6.7% | 6.7% | 0.46s |
+| Russian | 10 | 8.8% | 3.4% | 8.8% | 0.62s |
+| Spanish | 10 | 3.0% | 0.6% | 3.0% | 0.59s |
+| **Aggregate** | **100** | **16.0%** | **5.4%** | **9.54%** | **0.65s** |
 
-Artifact: `2026-02-15-manifest-quality-multilingual100-0p6b-refresh.json`
+Artifact: `2026-09-07-manifest-quality-multilingual100-0p6b.json`
 
 ### 1.7B (fp16)
 
 | Language | Samples | Primary | Latency |
 |---|---:|---:|---:|
-| Arabic | 10 | 16.5% | 3.78s |
-| Chinese | 10 | 8.5% | 2.38s |
-| English | 10 | 4.2% | 2.22s |
-| French | 10 | 4.1% | 3.25s |
-| German | 10 | 5.8% | 3.74s |
-| Hindi | 10 | 17.4% | 11.06s |
-| Japanese | 10 | 3.6% | 3.43s |
-| Korean | 10 | 5.5% | 3.25s |
-| Russian | 10 | 4.9% | 4.23s |
-| Spanish | 10 | 0.7% | 3.91s |
-| **Aggregate** | **100** | **6.70%** | **4.12s** |
+| Arabic | 10 | 16.0% | 1.09s |
+| Chinese | 10 | 8.5% | 0.75s |
+| English | 10 | 4.2% | 0.69s |
+| French | 10 | 4.1% | 1.05s |
+| German | 10 | 5.8% | 1.15s |
+| Hindi | 10 | 17.7% | 3.12s |
+| Japanese | 10 | 3.6% | 1.08s |
+| Korean | 10 | 5.3% | 0.98s |
+| Russian | 10 | 5.4% | 1.20s |
+| Spanish | 10 | 0.7% | 1.09s |
+| **Aggregate** | **100** | **6.70%** | **1.22s** |
 
-Artifact: `2026-02-15-manifest-quality-multilingual100-1p7b-refresh.json`
+Artifact: `2026-09-07-manifest-quality-multilingual100-1p7b.json`
 
 ### 0.6B vs 1.7B Comparison
 
 | Language | 0.6B Primary | 1.7B Primary | Delta | Latency Ratio |
 |---|---:|---:|---:|---:|
-| Arabic | 21.5% | 16.5% | -5.0pp | 2.90x |
-| Chinese | 4.4% | 8.5% | +4.1pp* | 2.94x |
-| English | 4.6% | 4.2% | -0.5pp | 2.74x |
-| French | 18.2% | 4.1% | **-14.1pp** | 2.85x |
-| German | 8.0% | 5.8% | -2.2pp | 2.70x |
-| Hindi | 16.7% | 17.4% | +0.7pp | 2.91x |
-| Japanese | 8.5% | 3.6% | -4.9pp | 2.78x |
-| Korean | 6.7% | 5.5% | -1.2pp | 2.79x |
-| Russian | 8.8% | 4.9% | -3.9pp | 2.88x |
-| Spanish | 3.0% | 0.7% | -2.2pp | 2.98x |
-| **Overall** | **9.37%** | **6.70%** | **-2.66pp** | **2.86x** |
+| Arabic | 21.5% | 16.0% | -5.5pp | 2.01x |
+| Chinese | 5.0% | 8.5% | +3.5pp | 2.08x |
+| English | 4.6% | 4.2% | -0.5pp | 2.18x |
+| French | 17.3% | 4.1% | -13.2pp | 2.10x |
+| German | 8.0% | 5.8% | -2.2pp | 1.76x |
+| Hindi | 16.7% | 17.7% | +1.0pp | 1.58x |
+| Japanese | 9.3% | 3.6% | -5.8pp | 2.11x |
+| Korean | 6.7% | 5.3% | -1.4pp | 2.13x |
+| Russian | 8.8% | 5.4% | -3.4pp | 1.95x |
+| Spanish | 3.0% | 0.7% | -2.2pp | 1.87x |
+| **Overall** | **9.54%** | **6.70%** | **-2.83pp** | **1.87x** |
 
-*Chinese +4.1pp is a numeric surface form artifact — the 1.7B spells out numbers in Chinese characters (e.g., `二十九` instead of `29`) while ground truth uses Arabic numerals. Both are correct. A number-aware normalizer would eliminate this gap.
+Chinese moves the other way because the 1.7B spells out numbers in Chinese
+characters (`二十九` instead of `29`) while the reference uses Arabic numerals;
+both are correct.
 
-**Takeaway:** 1.7B is the quality choice (28% relative improvement). 0.6B is the speed choice (2.86x faster). The biggest 1.7B wins are on French (-14.1pp), Arabic (-5.0pp), and Japanese (-4.9pp).
+**Takeaway:** 1.7B is the quality choice (30% relative improvement); 0.6B
+is the speed choice (1.9x faster). The biggest 1.7B wins are on French, Japanese
+and Arabic.
 
 ---
 
-## Long-Form Quality (FLEURS concatenated, ~75-90s per clip)
+## Long-Form Quality (FLEURS concatenated, 78-90s per clip)
 
-0.6B model, 10 clips (one per language).
+0.6B fp16, 10 clips (one per language) built deterministically from the
+multilingual manifest; manifest `2026-09-07-fleurs-longform-10x75-manifest.jsonl`.
 
 | Language | WER | CER | Primary | Latency |
 |---|---:|---:|---:|---:|
-| Arabic | 28.1% | 10.0% | 28.1% | 14.4s |
-| Chinese | 47.6% | 1.8% | 1.8% | 6.6s |
-| English | 8.0% | 2.9% | 8.0% | 8.7s |
-| French | 13.9% | 6.0% | 13.9% | 11.8s |
-| German | 6.1% | 2.2% | 6.1% | 12.0s |
-| Hindi | 32.4% | 28.0% | 32.4% | 25.8s |
-| Japanese | 89.5% | 10.9% | 10.9% | 7.2s |
-| Korean | 10.3% | 4.0% | 4.0% | 7.6s |
-| Russian | 15.2% | 4.7% | 15.2% | 9.5s |
-| Spanish | 3.7% | 0.7% | 3.7% | 7.8s |
-| **Aggregate** | **16.7%** | **7.0%** | **11.6%** | **11.1s** |
+| Arabic | 22.2% | 8.1% | 22.2% | 3.9s |
+| Chinese | 47.6% | 3.2% | 3.2% | 2.0s |
+| English | 5.7% | 1.9% | 5.7% | 2.7s |
+| French | 19.7% | 11.2% | 19.7% | 3.5s |
+| German | 6.1% | 3.4% | 6.1% | 3.4s |
+| Hindi | 25.0% | 13.8% | 25.0% | 8.1s |
+| Japanese | 89.5% | 10.6% | 10.6% | 2.8s |
+| Korean | 10.3% | 3.7% | 3.7% | 3.9s |
+| Russian | 11.6% | 4.2% | 11.6% | 4.1s |
+| Spanish | 4.3% | 0.4% | 4.3% | 3.2s |
+| **Aggregate** | **15.1%** | **6.0%** | **10.6%** | **3.8s** |
 
-Quality is consistent with short-clip results. No long-audio truncation or chunking artifacts.
+Quality is consistent with the short-clip lane: no truncation or chunking
+artifacts on 80-second inputs.
 
-Artifact: `2026-02-15-manifest-quality-longform10.md`
+Artifact: `2026-09-07-manifest-quality-longform10-0p6b.json`
 
 ---
 
-## Real-World Quality (AMI + Earnings22 chunked, n=200)
+## Real-World Quality (AMI + Earnings22 chunked, n=200, February 2026)
 
 Deterministic mixed-condition lane with 100 AMI IHM meeting chunks and 100
 Earnings22 chunked clips (16 speakers from AMI + 50 speakers from Earnings22).
@@ -217,7 +236,7 @@ Artifact: `2026-02-15-quality-head2head-mlx-vs-pytorch-realworld200.md`
 
 ---
 
-## MLX vs PyTorch Parity (0.6B, Multilingual-100)
+## MLX vs PyTorch Parity (0.6B, Multilingual-100, February 2026)
 
 Head-to-head quality comparison: same audio, same model weights, greedy decode.
 
@@ -386,6 +405,9 @@ All benchmark artifacts are committed under `docs/benchmarks/`. Key files:
 
 | Artifact | Description |
 |---|---|
+| `2026-09-07-quality-matrix-refresh.md` | v0.4.0 quality + latency refresh (commands and tables) |
+| `2026-09-07-quant-matrix-test-{clean,other}-speaker100.md` | v0.4.0 quantization quality |
+| `2026-09-07-latency-*.json` | v0.4.0 idle-machine latency runs |
 | `2026-02-14-quant-matrix-speaker100.md` | Quantization quality + latency matrix |
 | `2026-02-15-quant-matrix-test-other-speaker100.md` | Quantization quality + latency on LibriSpeech test-other |
 | `2026-02-15-manifest-quality-multilingual100-0p6b-refresh.json` | 0.6B multilingual quality |
