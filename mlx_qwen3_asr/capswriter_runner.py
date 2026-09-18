@@ -40,6 +40,9 @@ class CapsWriterRunnerConfig:
     wired_memory_auto_ratio: float = 1.2
     wired_memory_auto_max_ratio: float = 0.60
     prewarm_audio_seconds: float = 1.0
+    # 自动语言直接生成正文，避免先生成的单一语言标签将中英混说引向全英文。
+    # 仅影响未指定语言且无需对齐的转写；结果 language=unknown，False 可恢复旧入口。
+    auto_language_text_only: bool = True
 
 
 @dataclass(frozen=True)
@@ -250,6 +253,7 @@ class QwenASRRunner:
             context=context or "",
             language=language,
             return_timestamps=self.config.return_timestamps,
+            auto_language_text_only=self.config.auto_language_text_only,
             return_chunks=self.config.return_chunks,
             max_new_tokens=self.config.max_new_tokens,
             num_draft_tokens=self.config.num_draft_tokens,

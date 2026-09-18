@@ -82,8 +82,14 @@ class Session:
         num_draft_tokens: int = 4,
         verbose: bool = False,
         on_progress: Optional[ProgressCallback] = None,
+        auto_language_text_only: bool = False,
     ) -> TranscriptionResult:
-        """Transcribe audio using this session's loaded model/tokenizer."""
+        """使用当前 Session 转写；裸调用保持上游默认。
+
+        auto_language_text_only 由 CapsWriter Runner 按任务透传，不修改共享
+        tokenizer 状态。启用后自动语言模式直接生成正文，language 为 unknown；
+        显式语言以及需要语言标签的时间戳/说话人对齐仍走原路径。
+        """
         options = _build_transcribe_options(
             context=context,
             language=language,
@@ -124,6 +130,7 @@ class Session:
             draft_model_obj=draft_model_obj,
             context=options.context,
             language=options.language,
+            auto_language_text_only=auto_language_text_only,
             aligner=aligner,
             return_timestamps=options.return_timestamps,
             diarization_config=diarization_config,
@@ -152,8 +159,9 @@ class Session:
         num_draft_tokens: int = 4,
         verbose: bool = False,
         on_progress: Optional[ProgressCallback] = None,
+        auto_language_text_only: bool = False,
     ) -> TranscriptionResult:
-        """Async wrapper for ``transcribe`` using ``asyncio.to_thread``."""
+        """异步转写透传同一正文开关，避免同步与异步入口产生不同结果。"""
         options = _build_transcribe_options(
             context=context,
             language=language,
@@ -174,6 +182,7 @@ class Session:
             self.transcribe,
             audio,
             draft_model=draft_model,
+            auto_language_text_only=auto_language_text_only,
             **_transcribe_options_to_kwargs(options, include_dtype=False),
         )
 

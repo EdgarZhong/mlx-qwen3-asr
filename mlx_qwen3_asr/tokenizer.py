@@ -375,6 +375,8 @@ class Tokenizer:
         n_audio_tokens: int,
         language: Optional[str] = None,
         context: str = "",
+        *,
+        auto_language_text_only: bool = False,
     ) -> list[int]:
         """Build chat-template prompt with audio placeholder tokens.
 
@@ -399,6 +401,9 @@ class Tokenizer:
 
         Returns:
             List of token IDs forming the complete prompt
+
+        auto_language_text_only 为 CapsWriter 的可选正文入口：未指定语言时
+        预置正文分隔符，不生成语言标签；默认 False 保留上游裸 API 行为。
         """
         # System message
         tokens = [self.IM_START_ID]
@@ -426,6 +431,10 @@ class Tokenizer:
             canon_lang = canonicalize_language(language)
             if canon_lang:
                 tokens.extend(self.encode(f"language {canon_lang}<asr_text>"))
+        elif auto_language_text_only:
+            # 只改变 assistant 前缀，保留 system/context、音频占位和消息边界。
+            # 显式语言分支优先，不能再追加第二个正文分隔符。
+            tokens.extend(self.encode("<asr_text>"))
 
         return tokens
 

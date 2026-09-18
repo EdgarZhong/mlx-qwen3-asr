@@ -109,10 +109,27 @@ class TranscribeOptions:
     on_progress: Optional[ProgressCallback] = None
 
 
-def _join_chunk_texts(texts: list[str], language: str) -> str:
+def _join_chunk_texts(texts: list[str], language: str, *, text_only: bool = False) -> str:
     """Join per-chunk text while preserving languages without whitespace delimiters."""
     if not texts:
         return ""
+    if text_only:
+        # 正文模式没有语言标签，不能统一按 unknown 插空格，也不能猜整段为中文
+        # 后直接黏合英文词。只看拼接处的汉字/假名/全角标点；其余沿用空格分词。
+        # 既有 chunk 自带的空白原样保留，空 chunk 不额外制造分隔符。
+        joined = ""
+        for text in texts:
+            if not text:
+                continue
+            if joined and not (joined[-1].isspace() or text[0].isspace()):
+                boundary = joined[-1] + text[0]
+                unspaced = any(
+                    "\u3400" <= char <= "\u9fff" or "\u3000" <= char <= "\u30ff"
+                    or char in "，。！？；：（）【】" for char in boundary
+                )
+                joined += "" if unspaced else " "
+            joined += text
+        return joined
     normalized = (language or "").strip().lower()
     joiner = "" if normalized in CJK_LANG_ALIASES else " "
     return joiner.join(texts)
@@ -657,6 +674,7 @@ def _transcribe_loaded_components(
     num_draft_tokens: int,
     verbose: bool,
     on_progress: Optional[ProgressCallback] = None,
+    auto_language_text_only: bool = False,
 ) -> TranscriptionResult:
     """Transcribe using already-loaded model/tokenizer components."""
     chunks = split_audio_into_chunks(audio_np, sr=SAMPLE_RATE)
@@ -674,6 +692,9 @@ def _transcribe_loaded_components(
     detected_language = forced_language or "unknown"
     processed_sec = 0.0
     needs_alignment = bool(return_timestamps or diarization_config is not None)
+    # 对齐器需要模型返回语言标签；请求时间戳/说话人分段时保留原入口，
+    # 避免正文模式的 unknown 使 aligner 静默跳过。显式语言也保持原提示词。
+    use_text_only = auto_language_text_only and forced_language is None and not needs_alignment
 
     _emit_progress(
         on_progress,
@@ -732,6 +753,7 @@ def _transcribe_loaded_components(
             n_audio_tokens=n_audio_tokens,
             language=forced_language,
             context=context,
+            **({"auto_language_text_only": True} if use_text_only else {}),
         )
         input_ids = mx.array([prompt_tokens])
 
@@ -854,7 +876,7 @@ def _transcribe_loaded_components(
             if not fallback_chunks:
                 fallback_chunks = [
                     {
-                        "text": _join_chunk_texts(all_texts, final_language),
+                        "text": _join_chunk_texts(all_texts, final_language, text_only=use_text_only),
                         "start": 0.0,
                         "end": total_audio_sec,
                     }
@@ -891,7 +913,7 @@ def _transcribe_loaded_components(
         },
     )
     return TranscriptionResult(
-        text=_join_chunk_texts(all_texts, final_language),
+        text=_join_chunk_texts(all_texts, final_language, text_only=use_text_only),
         language=final_language,
         segments=out_segments,
         chunks=all_chunk_items if return_chunks else None,
