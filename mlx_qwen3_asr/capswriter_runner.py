@@ -17,6 +17,7 @@ import numpy as np
 from .audio import SAMPLE_RATE
 from .session import Session
 from .transcribe import TranscriptionResult
+from .wired_memory import LockedModelWeights
 
 
 @dataclass(frozen=True)
@@ -111,7 +112,7 @@ class QwenASRRunner:
         self._states: dict[str, _TaskAudioState] = {}
         self.prewarm_info: dict[str, object] = {}
         self.wired_memory_info: dict[str, object] = {}
-        self._previous_wired_limit: Optional[int] = None
+        self._locked_model_weights: Optional[LockedModelWeights] = None
         self._startup_initialize_runtime()
 
     def feed_audio(self, patch: AudioFeedPatch) -> Optional[QwenASRRunnerResult]:
@@ -188,13 +189,13 @@ class QwenASRRunner:
         }
 
     def cleanup(self) -> None:
-        """释放 Runner 持有的任务缓冲，并尽量恢复 MLX wired limit。
-
-        wired limit 是 MLX/Metal 进程级预算。服务端进程通常会直接退出，但显式
-        cleanup 可以让开发期模型重载或单测结束时恢复旧额度，避免同一进程内状态残留。
-        """
+        """释放任务缓冲和权重锁页；仅在本Runner确实持有锁时调用munlock。"""
         self._states.clear()
-        self._restore_wired_limit_safely()
+        if self._locked_model_weights is not None:
+            self._locked_model_weights.close()
+            self._locked_model_weights = None
+            self.wired_memory_info.update(
+                ok=False, locked_bytes=0, range_count=0, status="released")
 
     def _finalize_task(self, task_id: str) -> QwenASRRunnerResult:
         """拼接完整音频并调用现有 Session 管线生成最终结果。"""
@@ -261,10 +262,10 @@ class QwenASRRunner:
         )
 
     def _startup_initialize_runtime(self) -> None:
-        """按“先预热、后 wired”的顺序初始化运行态。
+        """先完成一次预热，再对已物化的真实权重页建立不可分页约束。
 
-        预热会让 MLX 完成首次 kernel 编译和关键缓存初始化；随后读取 active memory
-        再设置 wired limit，auto 策略才有接近当前模型规格的基准值。
+        mlock能直接锁定现有buffer，无需在加载前设置Metal预算；开关关闭时完全
+        不调用set_wired_limit或mlock。预热只付首次编译成本，不承担后台保活。
         """
         if self.config.enable_startup_prewarm:
             self._prewarm_safely()
@@ -272,7 +273,7 @@ class QwenASRRunner:
             self.prewarm_info = {"enabled": False}
 
         if self.config.enable_wired_memory:
-            self._configure_wired_memory_safely()
+            self._configure_wired_memory()
         else:
             self.wired_memory_info = {"enabled": False}
 
@@ -305,23 +306,14 @@ class QwenASRRunner:
                 "error": repr(exc),
             }
 
-    def _configure_wired_memory_safely(self) -> None:
-        """设置 MLX wired limit；不支持或失败时只记录状态，不让 server 启动失败。"""
+    def _configure_wired_memory(self) -> None:
+        """锁定全部权重页；开启常驻但失败时阻止启动，禁止静默降级或假报成功。"""
         try:
             import mlx.core as mx
+            from mlx.utils import tree_flatten
 
-            set_wired_limit = getattr(mx, "set_wired_limit", None)
-            if not callable(set_wired_limit):
-                self.wired_memory_info = {
-                    "enabled": True,
-                    "ok": False,
-                    "reason": "mlx.core.set_wired_limit unavailable",
-                }
-                return
-
-            active = int(getattr(mx, "get_active_memory")())
-            device_info_fn = getattr(mx, "device_info", None)
-            device_info = device_info_fn() if callable(device_info_fn) else {}
+            active = int(mx.get_active_memory())
+            device_info = mx.device_info()
             memory_size = int(device_info.get("memory_size") or 0)
             recommended = int(device_info.get("max_recommended_working_set_size") or 0)
             limit = self._resolve_wired_limit(
@@ -329,32 +321,31 @@ class QwenASRRunner:
                 memory_size_bytes=memory_size,
                 recommended_bytes=recommended,
             )
-            if limit <= 0:
-                self.wired_memory_info = {
-                    "enabled": True,
-                    "ok": False,
-                    "reason": "resolved limit <= 0",
-                    "active_bytes": active,
-                }
-                return
-
-            previous = int(set_wired_limit(limit))
-            self._previous_wired_limit = previous
+            # parameters包含量化权重、scale/bias以及冻结参数；只取共享buffer，
+            # 不锁临时KV/cache，不通过复制权重伪造常驻，也不更改进程Metal额度。
+            locked = LockedModelWeights(
+                (array for _, array in tree_flatten(self.session.model.parameters())),
+                limit_bytes=limit,
+            )
+            self._locked_model_weights = locked
             self.wired_memory_info = {
                 "enabled": True,
                 "ok": True,
+                "method": "mlock",
+                "locked_bytes": locked.locked_bytes,
+                "tensor_count": locked.tensor_count,
+                "range_count": locked.range_count,
                 "limit_bytes": limit,
-                "previous_limit_bytes": previous,
                 "active_bytes": active,
                 "memory_size_bytes": memory_size,
                 "recommended_bytes": recommended,
             }
         except Exception as exc:
-            self.wired_memory_info = {
-                "enabled": True,
-                "ok": False,
-                "error": repr(exc),
-            }
+            self.wired_memory_info = {"enabled": True, "ok": False, "error": repr(exc)}
+            raise RuntimeError(
+                "权重锁页失败，无法保证常驻内存；请检查锁页预算/系统错误，"
+                "或将enable_wired_memory=False以明确允许换出。"
+            ) from exc
 
     def _resolve_wired_limit(
         self,
@@ -365,7 +356,7 @@ class QwenASRRunner:
     ) -> int:
         """解析 wired limit。
 
-        `auto` 不是固定占用内存，而是根据预热后的 MLX active memory 给一个常驻预算。
+        `auto` 根据预热后的active memory计算锁页预算；实际只锁全部模型权重页。
         预算会低于系统推荐 working set，也会按总内存比例收口，避免把额度开得过大。
         """
         configured = self.config.wired_memory_limit
@@ -379,8 +370,7 @@ class QwenASRRunner:
         if memory_size_bytes > 0:
             caps.append(int(memory_size_bytes * float(self.config.wired_memory_auto_max_ratio)))
         if recommended_bytes > 0:
-            # 官方建议 wired limit 不应超过 max_recommended_working_set_size；
-            # 这里再留一点余量，避免用户机器状态变化时顶到系统错误。
+            # 保留现有资源预算上限；预算不足时拒绝部分锁页，不牺牲常驻语义。
             caps.append(int(recommended_bytes * 0.90))
         if caps:
             base = min(base, *caps)
@@ -400,26 +390,13 @@ class QwenASRRunner:
             "g": 1024 ** 3,
             "gb": 1024 ** 3,
         }
-        for suffix, multiplier in sorted(units.items(), key=lambda item: len(item[0]), reverse=True):
+        for suffix, multiplier in sorted(
+            units.items(), key=lambda item: len(item[0]), reverse=True
+        ):
             if text.endswith(suffix):
                 number = float(text[: -len(suffix)].strip())
                 return int(number * multiplier)
         return int(text)
-
-    def _restore_wired_limit_safely(self) -> None:
-        """尽量恢复进入 Runner 前的 wired limit；失败不影响主流程退出。"""
-        if self._previous_wired_limit is None:
-            return
-        try:
-            import mlx.core as mx
-
-            set_wired_limit = getattr(mx, "set_wired_limit", None)
-            if callable(set_wired_limit):
-                set_wired_limit(int(self._previous_wired_limit))
-        except Exception:
-            return
-        finally:
-            self._previous_wired_limit = None
 
     @staticmethod
     def _concat_audio(state: _TaskAudioState) -> np.ndarray:

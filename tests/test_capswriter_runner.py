@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
+import mlx.core as mx
 import numpy as np
+import pytest
 
+import mlx_qwen3_asr.capswriter_runner as runner_module
 from mlx_qwen3_asr.capswriter_runner import (
     AudioFeedPatch,
     CapsWriterRunnerConfig,
@@ -101,3 +105,77 @@ def test_capswriter_runner_resamples_in_memory_audio_without_ffmpeg() -> None:
     assert result.duration == 0.1
     assert len(session.calls) == 1
     assert session.calls[0]["audio"].shape == (1600,)
+
+
+@pytest.fixture
+def memory_runtime(monkeypatch):
+    """隔离进程级Metal额度和真实锁页，检查Runner是否选择正确的生命周期。"""
+    events = []
+    monkeypatch.setattr(mx, "set_wired_limit", lambda n: events.append(("metal", n)) or 0)
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 10000)
+    monkeypatch.setattr(mx, "device_info", lambda: {
+        "memory_size": 100000, "max_recommended_working_set_size": 80000})
+
+    class FakeLock:
+        """仅模拟成功持有的锁页资源，底层页范围与错误回滚由专项测试验证。"""
+        locked_bytes = 8192
+        tensor_count = 1
+        range_count = 1
+
+        def __init__(self, arrays, *, limit_bytes):
+            events.append(("lock", limit_bytes, len(list(arrays))))
+
+        def close(self):
+            events.append(("unlock",))
+
+    monkeypatch.setattr(runner_module, "LockedModelWeights", FakeLock, raising=False)
+    session = _FakeSession()
+    session.model = SimpleNamespace(parameters=lambda: {"weight": np.ones(1024)})
+    return session, events
+
+
+def test_resident_mode_requires_actual_weight_lock(memory_runtime):
+    """回归旧实现仅设置Metal预算便宣称常驻成功的问题。"""
+    session, events = memory_runtime
+    runner = QwenASRRunner("fake", session=session)
+    assert events == [("lock", 12000, 1)]
+    assert runner.wired_memory_info["method"] == "mlock"
+    assert runner.wired_memory_info["locked_bytes"] == 8192
+    assert runner.wired_memory_info["ok"] is True
+    runner.cleanup()
+    runner.cleanup()
+    assert events[-1] == ("unlock",)
+    assert events.count(("unlock",)) == 1
+    assert runner.wired_memory_info["ok"] is False
+
+
+def test_pageable_mode_never_touches_memory_locking(memory_runtime):
+    """关闭开关允许系统管理内存，预热仍执行，但不调用任何额度或锁页接口。"""
+    session, events = memory_runtime
+    runner = QwenASRRunner("fake", session=session,
+        config=CapsWriterRunnerConfig(enable_wired_memory=False))
+    runner.cleanup()
+    assert events == []
+    assert len(session.calls) == 1
+    assert runner.wired_memory_info == {"enabled": False}
+
+
+def test_resident_mode_fails_startup_when_lock_fails(memory_runtime, monkeypatch):
+    """常驻承诺不能在原生锁页失败后静默降级为可换出模式。"""
+    session, events = memory_runtime
+    def fail_lock(*args, **kwargs):
+        raise OSError(12, "injected lock failure")
+    monkeypatch.setattr(runner_module, "LockedModelWeights", fail_lock)
+    with pytest.raises(RuntimeError, match="权重锁页失败"):
+        QwenASRRunner("fake", session=session)
+    assert events == []
+
+
+def test_resident_mode_without_prewarm_still_locks(memory_runtime):
+    """预热和常驻是独立配置，关闭预热不能使常驻开关失效。"""
+    session, events = memory_runtime
+    runner = QwenASRRunner("fake", session=session,
+        config=CapsWriterRunnerConfig(enable_startup_prewarm=False, wired_memory_limit="16k"))
+    assert events == [("lock", 16384, 1)]
+    assert session.calls == []
+    runner.cleanup()
